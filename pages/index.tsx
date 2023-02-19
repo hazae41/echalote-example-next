@@ -26,21 +26,6 @@ function useTor() {
   return useAsyncMemo(() => createTor(), [])
 }
 
-async function createCircuit(tor: Tor) {
-  while (true)
-    try {
-      const circuit = await tor.create()
-
-      await circuit.extend(false)
-      await circuit.extend(true)
-
-      return circuit
-    } catch (e: unknown) {
-      console.warn("Create failed", e)
-      await new Promise(ok => setTimeout(ok, 1000))
-    }
-}
-
 async function fetchText(url: string) {
   const res = await fetch(url)
 
@@ -61,27 +46,41 @@ function useText(url: string) {
   return useQuery(getText, [url])
 }
 
-async function fetchTorText(url: string, tor: Tor) {
-  const circuit = await createCircuit(tor)
-  const res = await circuit.fetch(url)
+async function tryFetchTorText(url: string, tor: Tor) {
+  while (true) {
+    try {
+      const circuit = await tor.tryCreateAndExtend()
 
-  if (!res.ok) {
-    const error = new Error(await res.text())
-    return { error }
+      const signal = AbortSignal.timeout(5000)
+      const res = await circuit.fetch(url, { signal })
+
+      if (!res.ok) {
+        const error = new Error(await res.text())
+        return { error }
+      }
+
+      const data = await res.text()
+      return { data }
+    } catch (e: unknown) {
+      await new Promise(ok => setTimeout(ok, 1000))
+    }
   }
-
-  const data = await res.text()
-  return { data }
 }
 
 function getTorText(url: string, tor?: Tor) {
   const key = tor ? `tor:${url}` : undefined
-  const fetcher = tor ? () => fetchTorText(url, tor!) : undefined
-  return getSingleSchema(key, fetcher)
+  const fetcher = tor ? () => tryFetchTorText(url, tor!) : undefined
+  return getSingleSchema(key, fetcher, { timeout: 30 * 1000 })
 }
 
 function useTorText(url: string, tor?: Tor) {
   return useQuery(getTorText, [url, tor])
+}
+
+function errorToString(error: unknown) {
+  if (error instanceof Error)
+    return error.message
+  return JSON.stringify(error)
 }
 
 export default function Page() {
@@ -99,16 +98,24 @@ export default function Page() {
     Open browser console and <button onClick={onClick}>click me</button>
     <div>
       {`Your real IP address is: `}
-      {realIP.loading
-        ? <>Loading...</>
-        : <>{realIP.data}</>}
+      {(() => {
+        if (realIP.loading)
+          return <>Loading...</>
+        if (realIP.error)
+          return <>Error: {errorToString(realIP.error)}</>
+        return <>{realIP.data}</>
+      })()}
     </div>
     <div>
       {`Your Tor IP address is: `}
-      {torIP.loading
-        ? <>Loading...</>
-        : <>{torIP.data}</>}
+      {(() => {
+        if (torIP.loading)
+          return <>Loading...</>
+        if (torIP.error)
+          return <>Error: {errorToString(torIP.error)}</>
+        return <>{torIP.data}</>
+      })()}
     </div>
-    If it fails, reload the page
+    If it hangs, reload the page
   </>
 }
