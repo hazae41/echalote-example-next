@@ -93,7 +93,7 @@ export default function Page() {
   const onClick = useCallback(() => {
     realIP.fetch()
     torIP.fetch()
-  }, [torIP])
+  }, [realIP, torIP])
 
   return <>
     Open browser console and <button onClick={onClick}>click me</button>
