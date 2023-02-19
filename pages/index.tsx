@@ -109,5 +109,6 @@ export default function Page() {
         ? <>Loading...</>
         : <>{torIP.data}</>}
     </div>
+    If it fails, reload the page
   </>
 }
