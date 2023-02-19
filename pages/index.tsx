@@ -1,5 +1,5 @@
 import { createWebSocketSnowflakeStream, Tor } from "@hazae41/echalote";
-import { getSingleSchema, useQuery } from "@hazae41/xswr";
+import { FetcherMore, getSingleSchema, useQuery } from "@hazae41/xswr";
 import { DependencyList, useCallback, useEffect, useState } from "react";
 import fallbacks from "../assets/fallbacks.json";
 
@@ -46,12 +46,12 @@ function useText(url: string) {
   return useQuery(getText, [url])
 }
 
-async function tryFetchTorText(url: string, tor: Tor) {
+async function tryFetchTorText(url: string, tor: Tor, params: FetcherMore) {
+  const { signal } = params
+
   while (true) {
     try {
-      const circuit = await tor.tryCreateAndExtend()
-
-      const signal = AbortSignal.timeout(5000)
+      const circuit = await tor.tryCreateAndExtend({ signal })
       const res = await circuit.fetch(url, { signal })
 
       if (!res.ok) {
@@ -62,6 +62,9 @@ async function tryFetchTorText(url: string, tor: Tor) {
       const data = await res.text()
       return { data }
     } catch (e: unknown) {
+      if (signal?.aborted) throw e
+
+      console.warn("Fetch failed", e)
       await new Promise(ok => setTimeout(ok, 1000))
     }
   }
@@ -69,7 +72,7 @@ async function tryFetchTorText(url: string, tor: Tor) {
 
 function getTorText(url: string, tor?: Tor) {
   const key = tor ? `tor:${url}` : undefined
-  const fetcher = tor ? () => tryFetchTorText(url, tor!) : undefined
+  const fetcher = tor ? (_: string, more: FetcherMore) => tryFetchTorText(url, tor!, more) : undefined
   return getSingleSchema(key, fetcher, { timeout: 30 * 1000 })
 }
 
