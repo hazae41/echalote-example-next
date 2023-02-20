@@ -136,6 +136,5 @@ export default function Page() {
         return <>{torIP.data}</>
       })()}
     </div>
-    If it hangs, reload the page
   </>
 }
