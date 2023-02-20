@@ -60,8 +60,13 @@ async function tryFetchTorText(url: string, pool: CircuitPool, params: FetcherMo
   const { signal } = params
 
   while (true) {
+    if (signal?.aborted)
+      throw new Error(`Aborted`)
+    const circuit = await pool.get()
+
     try {
-      const res = await pool.fetch(url, { signal })
+      const signal = AbortSignal.timeout(5000)
+      const res = await circuit.fetch(url, { signal })
 
       if (!res.ok) {
         const error = new Error(await res.text())
@@ -73,6 +78,8 @@ async function tryFetchTorText(url: string, pool: CircuitPool, params: FetcherMo
     } catch (e: unknown) {
       if (signal?.aborted) throw e
 
+      circuit.destroy()
+
       console.warn("Fetch failed", e)
       await new Promise(ok => setTimeout(ok, 1000))
     }
@@ -82,7 +89,7 @@ async function tryFetchTorText(url: string, pool: CircuitPool, params: FetcherMo
 function getTorText(url: string, pool?: CircuitPool) {
   const key = pool ? `tor:${url}` : undefined
   const fetcher = pool ? (_: string, more: FetcherMore) => tryFetchTorText(url, pool!, more) : undefined
-  return getSingleSchema(key, fetcher)
+  return getSingleSchema(key, fetcher, { timeout: 30 * 1000 })
 }
 
 function useTorText(url: string, pool?: CircuitPool) {
