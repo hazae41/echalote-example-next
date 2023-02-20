@@ -82,7 +82,7 @@ async function tryFetchTorText(url: string, pool: CircuitPool, params: FetcherMo
 function getTorText(url: string, pool?: CircuitPool) {
   const key = pool ? `tor:${url}` : undefined
   const fetcher = pool ? (_: string, more: FetcherMore) => tryFetchTorText(url, pool!, more) : undefined
-  return getSingleSchema(key, fetcher, { timeout: 30 * 1000 })
+  return getSingleSchema(key, fetcher)
 }
 
 function useTorText(url: string, pool?: CircuitPool) {
