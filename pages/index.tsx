@@ -1,5 +1,5 @@
-import { CircuitPool, CircuitPoolParams, createWebSocketSnowflakeStream, Tor } from "@hazae41/echalote";
-import { FetcherMore, getSingleSchema, useQuery } from "@hazae41/xswr";
+import { CircuitPool, CircuitPoolParams, createWebSocketSnowflakeStream, TorClientDuplex } from "@hazae41/echalote";
+import { getSchema, useSchema } from "@hazae41/xswr";
 import { DependencyList, useCallback, useEffect, useMemo, useState } from "react";
 import fallbacks from "../assets/fallbacks.json";
 
@@ -14,26 +14,22 @@ function useAsyncMemo<T>(factory: () => Promise<T>, deps: DependencyList) {
   return state
 }
 
-async function createTor() {
-  const tcp = await createWebSocketSnowflakeStream("wss://snowflake.bamsoftware.com/")
-  // const tcp =  await createMeekStream("https://meek.bamsoftware.com/")
-  // const tcp =  await createWebSocketStream("ws://localhost:8080")
-
-  return new Tor(tcp, { fallbacks })
-}
-
 function useTor() {
-  return useAsyncMemo(() => createTor(), [])
+  return useAsyncMemo(async () => {
+    const tcp = await createWebSocketSnowflakeStream("wss://snowflake.bamsoftware.com/")
+    // const tcp =  await createMeekStream("https://meek.bamsoftware.com/")
+    // const tcp =  await createWebSocketStream("ws://localhost:8080")
+
+    return new TorClientDuplex(tcp, { fallbacks })
+  }, [])
 }
 
-function createCircuitPool(tor: Tor | undefined, params: CircuitPoolParams) {
-  if (!tor) return
+function useCircuitPool(tor: TorClientDuplex | undefined, params?: CircuitPoolParams) {
+  return useMemo(() => {
+    if (!tor) return
 
-  return new CircuitPool(tor, params)
-}
-
-function useCircuitPool(tor: Tor | undefined, params: CircuitPoolParams) {
-  return useMemo(() => createCircuitPool(tor, params), [tor])
+    return new CircuitPool(tor, params)
+  }, [tor])
 }
 
 async function fetchText(url: string) {
@@ -49,20 +45,21 @@ async function fetchText(url: string) {
 }
 
 function getText(url: string) {
-  return getSingleSchema(url, fetchText)
+  return getSchema(url, fetchText)
 }
 
 function useText(url: string) {
-  return useQuery(getText, [url])
+  return useSchema(getText, [url])
 }
 
-async function tryFetchTorText(url: string, pool: CircuitPool, params: FetcherMore) {
-  const { signal } = params
+async function tryFetchTorText(url: string, pool: CircuitPool, init: RequestInit) {
+  const { signal } = init
 
   while (true) {
     if (signal?.aborted)
       throw new Error(`Aborted`)
-    const circuit = await pool.get()
+
+    const circuit = await pool.random()
 
     try {
       const signal = AbortSignal.timeout(5000)
@@ -87,13 +84,15 @@ async function tryFetchTorText(url: string, pool: CircuitPool, params: FetcherMo
 }
 
 function getTorText(url: string, pool?: CircuitPool) {
-  const key = pool ? `tor:${url}` : undefined
-  const fetcher = pool ? (_: string, more: FetcherMore) => tryFetchTorText(url, pool!, more) : undefined
-  return getSingleSchema(key, fetcher, { timeout: 30 * 1000 })
+  if (!pool) return
+
+  return getSchema(`tor:${url}`, async (_: string, init: RequestInit) => {
+    return tryFetchTorText(url, pool!, init)
+  }, { timeout: 30 * 1000 })
 }
 
 function useTorText(url: string, pool?: CircuitPool) {
-  return useQuery(getTorText, [url, pool])
+  return useSchema(getTorText, [url, pool])
 }
 
 function errorToString(error: unknown) {
@@ -104,7 +103,7 @@ function errorToString(error: unknown) {
 
 export default function Page() {
   const tor = useTor()
-  const pool = useCircuitPool(tor, { count: 5 })
+  const pool = useCircuitPool(tor)
 
   const realIP = useText("https://icanhazip.com")
   const torIP = useTorText("https://icanhazip.com", pool)
