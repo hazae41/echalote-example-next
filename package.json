@@ -9,8 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@hazae41/echalote": "^0.2.22",
-    "@hazae41/xswr": "^1.2.4",
+    "@hazae41/echalote": "^0.2.23-0",
+    "@hazae41/xswr": "^1.4.0",
     "@types/node": "18.14.6",
     "@types/react": "18.0.28",
     "@types/react-dom": "18.0.11",
