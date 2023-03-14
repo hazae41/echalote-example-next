@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@hazae41/echalote": "^0.2.23-1",
+    "@hazae41/echalote": "^0.2.23-2",
     "@hazae41/xswr": "^1.4.1",
     "@types/node": "18.15.3",
     "@types/react": "18.0.28",

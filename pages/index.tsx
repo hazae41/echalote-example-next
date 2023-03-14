@@ -1,5 +1,5 @@
 import { Circuit, createCircuitPool, createWebSocketSnowflakeStream, TorClientDuplex } from "@hazae41/echalote";
-import { Pool, PoolParams } from "@hazae41/echalote/dist/types/libs/pool/pool";
+import { Pool, PoolParams } from "@hazae41/piscine";
 import { getSchema, useSchema } from "@hazae41/xswr";
 import { DependencyList, useCallback, useEffect, useMemo, useState } from "react";
 import fallbacks from "../assets/fallbacks.json";
