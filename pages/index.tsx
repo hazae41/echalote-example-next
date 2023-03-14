@@ -1,4 +1,5 @@
-import { CircuitPool, CircuitPoolParams, createWebSocketSnowflakeStream, TorClientDuplex } from "@hazae41/echalote";
+import { Circuit, createCircuitPool, createWebSocketSnowflakeStream, TorClientDuplex } from "@hazae41/echalote";
+import { Pool, PoolParams } from "@hazae41/echalote/dist/types/libs/pool/pool";
 import { getSchema, useSchema } from "@hazae41/xswr";
 import { DependencyList, useCallback, useEffect, useMemo, useState } from "react";
 import fallbacks from "../assets/fallbacks.json";
@@ -24,11 +25,11 @@ function useTor() {
   }, [])
 }
 
-function useCircuitPool(tor: TorClientDuplex | undefined, params?: CircuitPoolParams) {
+function useCircuitPool(tor?: TorClientDuplex, params?: PoolParams) {
   return useMemo(() => {
     if (!tor) return
 
-    return new CircuitPool(tor, params)
+    return createCircuitPool(tor, params)
   }, [tor])
 }
 
@@ -52,7 +53,7 @@ function useText(url: string) {
   return useSchema(getText, [url])
 }
 
-async function tryFetchTorText(url: string, pool: CircuitPool, init: RequestInit) {
+async function tryFetchTorText(url: string, pool: Pool<Circuit>, init: RequestInit) {
   const { signal } = init
 
   while (true) {
@@ -83,7 +84,7 @@ async function tryFetchTorText(url: string, pool: CircuitPool, init: RequestInit
   }
 }
 
-function getTorText(url: string, pool?: CircuitPool) {
+function getTorText(url: string, pool?: Pool<Circuit>) {
   if (!pool) return
 
   return getSchema(`tor:${url}`, async (_: string, init: RequestInit) => {
@@ -91,7 +92,7 @@ function getTorText(url: string, pool?: CircuitPool) {
   }, { timeout: 30 * 1000 })
 }
 
-function useTorText(url: string, pool?: CircuitPool) {
+function useTorText(url: string, pool?: Pool<Circuit>) {
   return useSchema(getTorText, [url, pool])
 }
 
@@ -103,7 +104,7 @@ function errorToString(error: unknown) {
 
 export default function Page() {
   const tor = useTor()
-  const pool = useCircuitPool(tor)
+  const pool = useCircuitPool(tor, { capacity: 10 })
 
   const realIP = useText("https://icanhazip.com")
   const torIP = useTorText("https://icanhazip.com", pool)
