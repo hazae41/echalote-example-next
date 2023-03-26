@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@hazae41/berith": "^1.1.40",
-    "@hazae41/echalote": "^0.2.28",
+    "@hazae41/echalote": "^0.2.29",
+    "@hazae41/ed25519": "^1.0.0",
+    "@hazae41/x25519": "^1.0.0",
     "@hazae41/xswr": "^1.5.0",
     "@types/node": "18.15.7",
     "@types/react": "18.0.28",
