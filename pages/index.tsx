@@ -1,7 +1,9 @@
 import { Berith } from "@hazae41/berith";
 import { Circuit, createCircuitPool, createWebSocketSnowflakeStream, TorClientDuplex } from "@hazae41/echalote";
 import { Ed25519 } from "@hazae41/ed25519";
+import { Morax } from "@hazae41/morax";
 import { Pool, PoolParams } from "@hazae41/piscine";
+import { Sha1 } from "@hazae41/sha1";
 import { X25519 } from "@hazae41/x25519";
 import { getSchema, useSchema } from "@hazae41/xswr";
 import { DependencyList, useCallback, useEffect, useMemo, useState } from "react";
@@ -21,15 +23,17 @@ function useAsyncMemo<T>(factory: () => Promise<T>, deps: DependencyList) {
 function useTor() {
   return useAsyncMemo(async () => {
     await Berith.initBundledOnce()
+    await Morax.initBundledOnce()
 
     const ed25519 = Ed25519.fromBerith(Berith)
     const x25519 = X25519.fromBerith(Berith)
+    const sha1 = Sha1.fromMorax(Morax)
 
     const tcp = await createWebSocketSnowflakeStream("wss://snowflake.bamsoftware.com/")
     // const tcp =  await createMeekStream("https://meek.bamsoftware.com/")
     // const tcp =  await createWebSocketStream("ws://localhost:8080")
 
-    return new TorClientDuplex(tcp, { fallbacks, ed25519, x25519 })
+    return new TorClientDuplex(tcp, { fallbacks, ed25519, x25519, sha1 })
   }, [])
 }
 
