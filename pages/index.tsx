@@ -1,13 +1,12 @@
 import { Berith } from "@hazae41/berith";
-import { Circuit, createCircuitPool, createWebSocketSnowflakeStream, TorClientDuplex } from "@hazae41/echalote";
+import { Circuit, createCircuitPool, createWebSocketSnowflakeStream, Fallback, TorClientDuplex } from "@hazae41/echalote";
 import { Ed25519 } from "@hazae41/ed25519";
 import { Morax } from "@hazae41/morax";
 import { Pool, PoolParams } from "@hazae41/piscine";
 import { Sha1 } from "@hazae41/sha1";
 import { X25519 } from "@hazae41/x25519";
-import { getSchema, useSchema } from "@hazae41/xswr";
+import { DataInit, ErrorInit, getSchema, Result, useSchema } from "@hazae41/xswr";
 import { DependencyList, useCallback, useEffect, useMemo, useState } from "react";
-import fallbacks from "../assets/fallbacks.json";
 
 function useAsyncMemo<T>(factory: () => Promise<T>, deps: DependencyList) {
   const [state, setState] = useState<T>()
@@ -29,6 +28,10 @@ function useTor() {
     const x25519 = X25519.fromBerith(Berith)
     const sha1 = Sha1.fromMorax(Morax)
 
+    const fallbacksUrl = "https://raw.githubusercontent.com/hazae41/echalote/master/tools/fallbacks/fallbacks.json"
+    const fallbacksRes = await fetchJson<Fallback[]>(fallbacksUrl)
+    const fallbacks = Result.from(fallbacksRes).unwrap()
+
     const tcp = await createWebSocketSnowflakeStream("wss://snowflake.bamsoftware.com/")
     // const tcp =  await createMeekStream("https://meek.bamsoftware.com/")
     // const tcp =  await createWebSocketStream("ws://localhost:8080")
@@ -43,6 +46,18 @@ function useCircuitPool(tor?: TorClientDuplex, params?: PoolParams) {
 
     return createCircuitPool(tor, params)
   }, [tor])
+}
+
+async function fetchJson<T>(url: string) {
+  const res = await fetch(url)
+
+  if (!res.ok) {
+    const error = new Error(await res.text())
+    return { error } as ErrorInit
+  }
+
+  const data = await res.json()
+  return { data } as DataInit<T>
 }
 
 async function fetchText(url: string) {
