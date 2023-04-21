@@ -29,7 +29,7 @@ function useTor() {
     const sha1 = Sha1.fromMorax(Morax)
 
     const fallbacksUrl = "https://raw.githubusercontent.com/hazae41/echalote/master/tools/fallbacks/fallbacks.json"
-    const fallbacksRes = await fetchJson<Fallback[]>(fallbacksUrl)
+    const fallbacksRes = await fetchAsJson<Fallback[]>(fallbacksUrl)
     const fallbacks = Result.from(fallbacksRes).unwrap()
 
     const tcp = await createWebSocketSnowflakeStream("wss://snowflake.bamsoftware.com/")
@@ -48,7 +48,7 @@ function useCircuitPool(tor?: TorClientDuplex, params?: PoolParams) {
   }, [tor])
 }
 
-async function fetchJson<T>(url: string) {
+async function fetchAsJson<T>(url: string) {
   const res = await fetch(url)
 
   if (!res.ok) {
@@ -60,7 +60,7 @@ async function fetchJson<T>(url: string) {
   return { data } as DataInit<T>
 }
 
-async function fetchText(url: string) {
+async function fetchAsText(url: string) {
   const res = await fetch(url)
 
   if (!res.ok) {
@@ -73,14 +73,14 @@ async function fetchText(url: string) {
 }
 
 function getText(url: string) {
-  return getSchema(url, fetchText)
+  return getSchema(url, fetchAsText)
 }
 
 function useText(url: string) {
   return useSchema(getText, [url])
 }
 
-async function tryFetchTorText(url: string, pool: Pool<Circuit>, init: RequestInit) {
+async function tryFetchTorAsText(url: string, pool: Pool<Circuit>, init: RequestInit) {
   const { signal } = init
 
   while (true) {
@@ -115,7 +115,7 @@ function getTorText(url: string, pool?: Pool<Circuit>) {
   if (!pool) return
 
   return getSchema(`tor:${url}`, async (_: string, init: RequestInit) => {
-    return tryFetchTorText(url, pool!, init)
+    return tryFetchTorAsText(url, pool!, init)
   }, { timeout: 30 * 1000 })
 }
 
@@ -123,10 +123,15 @@ function useTorText(url: string, pool?: Pool<Circuit>) {
   return useSchema(getTorText, [url, pool])
 }
 
-function errorToString(error: unknown) {
-  if (error instanceof Error)
-    return error.message
-  return JSON.stringify(error)
+
+export namespace Errors {
+
+  export function toString(error: unknown) {
+    if (error instanceof Error)
+      return error.message
+    return JSON.stringify(error)
+  }
+
 }
 
 export default function Page() {
@@ -149,7 +154,7 @@ export default function Page() {
         if (realIP.loading)
           return <>Loading...</>
         if (realIP.error)
-          return <>Error: {errorToString(realIP.error)}</>
+          return <>Error: {Errors.toString(realIP.error)}</>
         return <>{realIP.data}</>
       })()}
     </div>
@@ -159,7 +164,7 @@ export default function Page() {
         if (torIP.loading)
           return <>Loading...</>
         if (torIP.error)
-          return <>Error: {errorToString(torIP.error)}</>
+          return <>Error: {Errors.toString(torIP.error)}</>
         return <>{torIP.data}</>
       })()}
     </div>
