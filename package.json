@@ -10,23 +10,24 @@
   },
   "dependencies": {
     "@hazae41/berith": "^1.1.40",
-    "@hazae41/echalote": "^0.2.31",
+    "@hazae41/echalote": "^0.2.36",
     "@hazae41/ed25519": "^1.0.0",
     "@hazae41/morax": "^1.0.20",
+    "@hazae41/mutex": "^1.2.1",
     "@hazae41/sha1": "^1.0.0",
     "@hazae41/x25519": "^1.0.0",
-    "@hazae41/xswr": "^1.5.0",
-    "@types/node": "18.15.7",
-    "@types/react": "18.0.28",
+    "@hazae41/xswr": "^1.5.1",
+    "@types/node": "18.15.13",
+    "@types/react": "18.0.38",
     "@types/react-dom": "18.0.11",
-    "next": "13.2.4",
+    "next": "13.3.1",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "typescript": "5.0.2"
+    "typescript": "5.0.4"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.14",
-    "postcss": "^8.4.21",
-    "tailwindcss": "^3.2.7"
+    "postcss": "^8.4.23",
+    "tailwindcss": "^3.3.1"
   }
 }

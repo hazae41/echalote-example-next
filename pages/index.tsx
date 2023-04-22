@@ -2,6 +2,7 @@ import { Berith } from "@hazae41/berith";
 import { Circuit, createCircuitPool, createWebSocketSnowflakeStream, Fallback, TorClientDuplex } from "@hazae41/echalote";
 import { Ed25519 } from "@hazae41/ed25519";
 import { Morax } from "@hazae41/morax";
+import { Mutex } from "@hazae41/mutex";
 import { Pool, PoolParams } from "@hazae41/piscine";
 import { Sha1 } from "@hazae41/sha1";
 import { X25519 } from "@hazae41/x25519";
@@ -44,7 +45,7 @@ function useCircuitPool(tor?: TorClientDuplex, params?: PoolParams) {
   return useMemo(() => {
     if (!tor) return
 
-    return createCircuitPool(tor, params)
+    return new Mutex(createCircuitPool(tor, params))
   }, [tor])
 }
 
@@ -80,14 +81,18 @@ function useText(url: string) {
   return useSchema(getText, [url])
 }
 
-async function tryFetchTorAsText(url: string, pool: Pool<Circuit>, init: RequestInit) {
+async function tryFetchTorAsText(url: string, pool: Mutex<Pool<Circuit>>, init: RequestInit) {
   const { signal } = init
 
   while (true) {
     if (signal?.aborted)
       throw new Error(`Aborted`)
 
-    const circuit = await pool.random()
+    const circuit = await pool.lock(async (circuits) => {
+      const circuit = await circuits.cryptoRandom()
+      circuits.delete(circuit)
+      return circuit
+    })
 
     try {
       const signal = AbortSignal.timeout(5000)
@@ -111,18 +116,17 @@ async function tryFetchTorAsText(url: string, pool: Pool<Circuit>, init: Request
   }
 }
 
-function getTorText(url: string, pool?: Pool<Circuit>) {
+function getTorText(url: string, pool?: Mutex<Pool<Circuit>>) {
   if (!pool) return
 
-  return getSchema(`tor:${url}`, async (_: string, init: RequestInit) => {
-    return tryFetchTorAsText(url, pool!, init)
+  return getSchema(`tor:${url}`, async (_, init) => {
+    return tryFetchTorAsText(url, pool, init)
   }, { timeout: 30 * 1000 })
 }
 
-function useTorText(url: string, pool?: Pool<Circuit>) {
+function useTorText(url: string, pool?: Mutex<Pool<Circuit>>) {
   return useSchema(getTorText, [url, pool])
 }
-
 
 export namespace Errors {
 
