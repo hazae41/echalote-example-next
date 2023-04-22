@@ -45,8 +45,16 @@ function useCircuitPool(tor?: TorClientDuplex, params?: PoolParams) {
   return useMemo(() => {
     if (!tor) return
 
-    return new Mutex(createCircuitPool(tor, params))
+    return createCircuitPool(tor, params)
   }, [tor])
+}
+
+function useMutex<T>(inner?: T) {
+  return useMemo(() => {
+    if (!inner) return
+
+    return new Mutex(inner)
+  }, [inner])
 }
 
 async function fetchAsJson<T>(url: string) {
@@ -141,14 +149,33 @@ export namespace Errors {
 export default function Page() {
   const tor = useTor()
   const pool = useCircuitPool(tor, { capacity: 10 })
+  const mutex = useMutex(pool)
 
   const realIP = useText("https://icanhazip.com")
-  const torIP = useTorText("https://icanhazip.com", pool)
+  const torIP = useTorText("https://icanhazip.com", mutex)
 
   const onClick = useCallback(() => {
     realIP.fetch()
     torIP.fetch()
   }, [realIP, torIP])
+
+  const [_, setCounter] = useState(0)
+
+  useEffect(() => {
+    if (!pool) return
+
+    const onCreatedOrDeleted = () => {
+      setCounter(c => c + 1)
+    }
+
+    pool.events.addEventListener("created", onCreatedOrDeleted, { passive: true })
+    pool.events.addEventListener("deleted", onCreatedOrDeleted, { passive: true })
+
+    return () => {
+      pool.events.removeEventListener("created", onCreatedOrDeleted)
+      pool.events.removeEventListener("deleted", onCreatedOrDeleted)
+    }
+  }, [pool])
 
   return <>
     Open browser console and <button onClick={onClick}>click me</button>
@@ -172,5 +199,9 @@ export default function Page() {
         return <>{torIP.data}</>
       })()}
     </div>
+    {pool &&
+      <div>
+        Circuits pool size: {pool.size} / {pool.capacity}
+      </div>}
   </>
 }
