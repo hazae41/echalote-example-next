@@ -6,7 +6,7 @@ import { Mutex } from "@hazae41/mutex";
 import { Pool, PoolParams } from "@hazae41/piscine";
 import { Sha1 } from "@hazae41/sha1";
 import { X25519 } from "@hazae41/x25519";
-import { DataInit, ErrorInit, FetchResult, getSchema, useSchema } from "@hazae41/xswr";
+import { DataInit, FailInit, Fetched, getSchema, useSchema } from "@hazae41/xswr";
 import { DependencyList, useCallback, useEffect, useMemo, useState } from "react";
 
 function useAsyncMemo<T>(factory: () => Promise<T>, deps: DependencyList) {
@@ -31,7 +31,7 @@ function useTor() {
 
     const fallbacksUrl = "https://raw.githubusercontent.com/hazae41/echalote/master/tools/fallbacks/fallbacks.json"
     const fallbacksRes = await fetchAsJson<Fallback[]>(fallbacksUrl)
-    const fallbacks: Fallback[] = FetchResult.from(fallbacksRes as any).unwrap() as any
+    const fallbacks = Fetched.from(fallbacksRes).unwrap()
 
     const tcp = await createWebSocketSnowflakeStream("wss://snowflake.bamsoftware.com/")
     // const tcp =  await createMeekStream("https://meek.bamsoftware.com/")
@@ -62,7 +62,7 @@ async function fetchAsJson<T>(url: string) {
 
   if (!res.ok) {
     const error = new Error(await res.text())
-    return { error } as ErrorInit
+    return { error } as FailInit
   }
 
   const data = await res.json()
