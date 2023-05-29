@@ -4,6 +4,7 @@ import { Ed25519 } from "@hazae41/ed25519";
 import { Morax } from "@hazae41/morax";
 import { Mutex } from "@hazae41/mutex";
 import { Pool, PoolParams } from "@hazae41/piscine";
+import { Ok } from "@hazae41/result";
 import { Sha1 } from "@hazae41/sha1";
 import { X25519 } from "@hazae41/x25519";
 import { DataInit, FailInit, Fetched, getSchema, useSchema } from "@hazae41/xswr";
@@ -37,7 +38,11 @@ function useTor() {
     // const tcp =  await createMeekStream("https://meek.bamsoftware.com/")
     // const tcp =  await createWebSocketStream("ws://localhost:8080")
 
-    return new TorClientDuplex(tcp, { fallbacks, ed25519, x25519, sha1 })
+    const tor = new TorClientDuplex(tcp, { fallbacks, ed25519, x25519, sha1 })
+
+    await tor.tryWait().then(r => r.unwrap())
+
+    return tor
   }, [])
 }
 
@@ -92,19 +97,16 @@ function useText(url: string) {
 async function tryFetchTorAsText(url: string, pool: Mutex<Pool<Circuit>>, init: RequestInit) {
   const { signal } = init
 
-  while (true) {
-    if (signal?.aborted)
-      throw new Error(`Aborted`)
-
+  while (!signal?.aborted) {
     const circuit = await pool.lock(async (circuits) => {
-      const circuit = await circuits.cryptoRandom()
-      circuits.delete(circuit)
+      const circuit = await circuits.tryGetCryptoRandom()
+      circuit.inspectSync(circuit => circuits.delete(circuit))
       return circuit
-    })
+    }).then(r => r.unwrap())
 
     try {
       const signal = AbortSignal.timeout(5000)
-      const res = (await circuit.tryFetch(url, { signal })).unwrap()
+      const res = await circuit.tryFetch(url, { signal }).then(r => r.unwrap())
 
       if (!res.ok) {
         const error = new Error(await res.text())
@@ -122,6 +124,8 @@ async function tryFetchTorAsText(url: string, pool: Mutex<Pool<Circuit>>, init: 
       await new Promise(ok => setTimeout(ok, 1000))
     }
   }
+
+  throw new Error(`Aborted`)
 }
 
 function getTorText(url: string, pool?: Mutex<Pool<Circuit>>) {
@@ -166,14 +170,15 @@ export default function Page() {
 
     const onCreatedOrDeleted = () => {
       setCounter(c => c + 1)
+      return Ok.void()
     }
 
-    pool.events.addEventListener("created", onCreatedOrDeleted, { passive: true })
-    pool.events.addEventListener("deleted", onCreatedOrDeleted, { passive: true })
+    pool.events.on("created", onCreatedOrDeleted, { passive: true })
+    pool.events.on("deleted", onCreatedOrDeleted, { passive: true })
 
     return () => {
-      pool.events.removeEventListener("created", onCreatedOrDeleted)
-      pool.events.removeEventListener("deleted", onCreatedOrDeleted)
+      pool.events.off("created", onCreatedOrDeleted)
+      pool.events.off("deleted", onCreatedOrDeleted)
     }
   }, [pool])
 
