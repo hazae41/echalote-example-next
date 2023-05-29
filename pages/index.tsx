@@ -204,9 +204,12 @@ export default function Page() {
         return <>{torIP.data}</>
       })()}
     </div>
-    {pool &&
-      <div>
+    {pool
+      ? <div>
         Circuits pool size: {pool.size} / {pool.capacity}
+      </div>
+      : <div>
+        Loading...
       </div>}
   </>
 }
