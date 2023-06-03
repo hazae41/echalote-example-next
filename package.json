@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@hazae41/echalote": "^0.2.45",
+    "@hazae41/echalote": "^0.2.46",
     "@hazae41/ed25519": "^1.0.0",
     "@hazae41/mutex": "^1.2.7",
     "@hazae41/result": "^1.0.45",
