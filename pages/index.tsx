@@ -1,14 +1,24 @@
-import { Berith } from "@hazae41/berith";
-import { Circuit, createCircuitPool, createWebSocketSnowflakeStream, Fallback, TorClientDuplex } from "@hazae41/echalote";
+import { Circuit, createPooledCircuit, createPooledTor, createWebSocketSnowflakeStream, Fallback, TooManyRetriesError, TorClientDuplex, tryCreateLoop } from "@hazae41/echalote";
 import { Ed25519 } from "@hazae41/ed25519";
-import { Morax } from "@hazae41/morax";
 import { Mutex } from "@hazae41/mutex";
 import { Pool, PoolParams } from "@hazae41/piscine";
-import { Ok } from "@hazae41/result";
+import { Ok, Result } from "@hazae41/result";
 import { Sha1 } from "@hazae41/sha1";
 import { X25519 } from "@hazae41/x25519";
-import { DataInit, FailInit, Fetched, getSchema, useSchema } from "@hazae41/xswr";
+import { Data, Fail, FetcherMore, getSchema, useSchema } from "@hazae41/xswr";
+import { ed25519 as noble_ed25519, x25519 as noble_x25519 } from "@noble/curves/ed25519";
+import { sha1 as noble_sha1 } from "@noble/hashes/sha1";
 import { DependencyList, useCallback, useEffect, useMemo, useState } from "react";
+
+export namespace Errors {
+
+  export function toString(error: unknown) {
+    if (error instanceof Error)
+      return error.message
+    return JSON.stringify(error)
+  }
+
+}
 
 function useAsyncMemo<T>(factory: () => Promise<T>, deps: DependencyList) {
   const [state, setState] = useState<T>()
@@ -21,69 +31,64 @@ function useAsyncMemo<T>(factory: () => Promise<T>, deps: DependencyList) {
   return state
 }
 
-function useTor() {
+function useTorPool(params?: PoolParams) {
   return useAsyncMemo(async () => {
-    await Berith.initBundledOnce()
-    await Morax.initBundledOnce()
-
-    const ed25519 = Ed25519.fromBerith(Berith)
-    const x25519 = X25519.fromBerith(Berith)
-    const sha1 = Sha1.fromMorax(Morax)
+    const ed25519 = Ed25519.fromNoble(noble_ed25519)
+    const x25519 = X25519.fromNoble(noble_x25519)
+    const sha1 = Sha1.fromNoble(noble_sha1)
 
     const fallbacksUrl = "https://raw.githubusercontent.com/hazae41/echalote/master/tools/fallbacks/fallbacks.json"
-    const fallbacksRes = await fetchAsJson<Fallback[]>(fallbacksUrl)
-    const fallbacks = Fetched.from(fallbacksRes).unwrap()
+    const fallbacks = await fetchAsJson<Fallback[]>(fallbacksUrl).then(r => r.unwrap())
 
-    const tcp = await createWebSocketSnowflakeStream("wss://snowflake.bamsoftware.com/")
-    // const tcp =  await createMeekStream("https://meek.bamsoftware.com/")
-    // const tcp =  await createWebSocketStream("ws://localhost:8080")
+    return new Mutex(new Pool<TorClientDuplex, Error>(async (params) => {
+      return await Result.unthrow(async t => {
+        const tor = await tryCreateLoop(async () => {
+          const tcp = await createWebSocketSnowflakeStream("wss://snowflake.bamsoftware.com/")
+          // const tcp =  await createMeekStream("https://meek.bamsoftware.com/")
+          // const tcp =  await createWebSocketStream("ws://localhost:8080")
 
-    const tor = new TorClientDuplex(tcp, { fallbacks, ed25519, x25519, sha1 })
+          const tor = new TorClientDuplex(tcp, { fallbacks, ed25519, x25519, sha1 })
 
-    await tor.tryWait().then(r => r.unwrap())
+          return await tor.tryWait().then(r => r.set(tor))
+        }, params).then(r => r.throw(t))
 
-    return tor
+        return new Ok(createPooledTor(tor, params))
+      })
+    }, params))
   }, [])
 }
 
-function useCircuitPool(tor?: TorClientDuplex, params?: PoolParams) {
+function useCircuitPool(tors?: Mutex<Pool<TorClientDuplex, Error>>, params?: PoolParams) {
   return useMemo(() => {
-    if (!tor) return
+    if (!tors) return
 
-    return createCircuitPool(tor, params)
-  }, [tor])
-}
+    return new Mutex(new Pool<Circuit, Error>(async (params) => {
+      return await Result.unthrow(async t => {
+        const { index, signal } = params
 
-function useMutex<T>(inner?: T) {
-  return useMemo(() => {
-    if (!inner) return
+        const tor = await tors.inner.tryGet(index % tors.inner.capacity).then(r => r.throw(t))
+        const circuit = await tor.tryCreateAndExtendLoop(signal).then(r => r.throw(t))
 
-    return new Mutex(inner)
-  }, [inner])
+        return new Ok(createPooledCircuit(circuit, params))
+      })
+    }, params))
+  }, [tors])
 }
 
 async function fetchAsJson<T>(url: string) {
-  const res = await fetch(url)
+  const response = await fetch(url)
 
-  if (!res.ok) {
-    const error = new Error(await res.text())
-    return { error } as FailInit
-  }
-
-  const data = await res.json()
-  return { data } as DataInit<T>
+  if (!response.ok)
+    return new Fail(new Error(await response.text()))
+  return new Data(await response.json() as T)
 }
 
 async function fetchAsText(url: string) {
   const res = await fetch(url)
 
-  if (!res.ok) {
-    const error = new Error(await res.text())
-    return { error }
-  }
-
-  const data = await res.text()
-  return { data }
+  if (!res.ok)
+    return new Fail(new Error(await res.text()))
+  return new Data(await res.text())
 }
 
 function getText(url: string) {
@@ -94,93 +99,80 @@ function useText(url: string) {
   return useSchema(getText, [url])
 }
 
-async function tryFetchTorAsText(url: string, pool: Mutex<Pool<Circuit>>, init: RequestInit) {
+async function tryFetchTorAsText(url: string, circuits: Mutex<Pool<Circuit, Error>>, init: FetcherMore) {
   const { signal } = init
 
-  while (!signal?.aborted) {
-    const circuit = await pool.lock(async (circuits) => {
-      const circuit = await circuits.tryGetCryptoRandom()
-      circuit.inspectSync(circuit => circuits.delete(circuit))
-      return circuit
-    }).then(r => r.unwrap())
+  for (let i = 0; !signal?.aborted && i < 3; i++) {
+    const circuit = await Pool.takeCryptoRandom(circuits).then(r => r.unwrap().result.get())
 
-    try {
-      const signal = AbortSignal.timeout(5000)
-      const res = await circuit.tryFetch(url, { signal }).then(r => r.unwrap())
+    const subsignal = AbortSignal.timeout(5_000)
+    const response = await circuit.tryFetch(url, { signal: subsignal })
 
-      if (!res.ok) {
-        const error = new Error(await res.text())
-        return { error }
-      }
-
-      const data = await res.text()
-      return { data }
-    } catch (e: unknown) {
-      if (signal?.aborted) throw e
-
-      circuit.tryDestroy()
-
-      console.warn("Fetch failed", e)
-      await new Promise(ok => setTimeout(ok, 1000))
+    if (response.isErr()) {
+      console.warn(`Failed ${i + 1} time(s)`, { e: response.get() })
+      await new Promise(ok => setTimeout(ok, 1000 * (2 ** i)))
+      continue
     }
+
+    if (!response.inner.ok)
+      return new Fail(new Error(await response.get().text()))
+    return new Data(await response.get().text())
   }
 
-  throw new Error(`Aborted`)
+  if (signal?.aborted)
+    return new Fail(new Error(`Aborted`, { cause: signal.reason }))
+  return new Fail(new TooManyRetriesError())
 }
 
-function getTorText(url: string, pool?: Mutex<Pool<Circuit>>) {
+function getTorText(url: string, pool?: Mutex<Pool<Circuit, Error>>) {
   if (!pool) return
 
   return getSchema(`tor:${url}`, async (_, init) => {
     return tryFetchTorAsText(url, pool, init)
-  }, { timeout: 30 * 1000 })
+  }, { timeout: 5 * 5_000 })
 }
 
-function useTorText(url: string, pool?: Mutex<Pool<Circuit>>) {
+function useTorText(url: string, pool?: Mutex<Pool<Circuit, Error>>) {
   return useSchema(getTorText, [url, pool])
 }
 
-export namespace Errors {
+function usePoolSizeAndCapacity<T, E>(circuits?: Mutex<Pool<T, E>>) {
+  const [sizeAndCapacity, setSizeAndCapacity] = useState<{ size: number, capacity: number }>()
 
-  export function toString(error: unknown) {
-    if (error instanceof Error)
-      return error.message
-    return JSON.stringify(error)
-  }
+  useEffect(() => {
+    if (!circuits) return
 
+    const onCreatedOrDeleted = () => {
+      const { size, capacity } = circuits.inner
+      setSizeAndCapacity({ size, capacity })
+      return Ok.void()
+    }
+
+    const offCreated = circuits.inner.events.on("created", onCreatedOrDeleted, { passive: true })
+    const offDeleted = circuits.inner.events.on("deleted", onCreatedOrDeleted, { passive: true })
+
+    return () => {
+      offCreated()
+      offDeleted()
+    }
+  }, [circuits])
+
+  return sizeAndCapacity
 }
 
 export default function Page() {
-  const tor = useTor()
-  const pool = useCircuitPool(tor, { capacity: 10 })
-  const mutex = useMutex(pool)
+  const tors = useTorPool({ capacity: 3 })
+  const circuits = useCircuitPool(tors, { capacity: 9 })
 
   const realIP = useText("https://icanhazip.com")
-  const torIP = useTorText("https://icanhazip.com", mutex)
+  const torIP = useTorText("https://icanhazip.com", circuits)
 
   const onClick = useCallback(() => {
     realIP.fetch()
     torIP.fetch()
   }, [realIP, torIP])
 
-  const [_, setCounter] = useState(0)
-
-  useEffect(() => {
-    if (!pool) return
-
-    const onCreatedOrDeleted = () => {
-      setCounter(c => c + 1)
-      return Ok.void()
-    }
-
-    pool.events.on("created", onCreatedOrDeleted, { passive: true })
-    pool.events.on("deleted", onCreatedOrDeleted, { passive: true })
-
-    return () => {
-      pool.events.off("created", onCreatedOrDeleted)
-      pool.events.off("deleted", onCreatedOrDeleted)
-    }
-  }, [pool])
+  const sizeAndCapacity = usePoolSizeAndCapacity(circuits)
 
   return <>
     Open browser console and <button onClick={onClick}>click me</button>
@@ -204,9 +196,9 @@ export default function Page() {
         return <>{torIP.data}</>
       })()}
     </div>
-    {pool
+    {sizeAndCapacity
       ? <div>
-        Circuits pool size: {pool.size} / {pool.capacity}
+        Circuits pool size: {sizeAndCapacity.size} / {sizeAndCapacity.capacity}
       </div>
       : <div>
         Loading...
