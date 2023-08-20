@@ -1,11 +1,12 @@
-import { Circuit, createPooledCircuit, createPooledTor, createWebSocketSnowflakeStream, Fallback, TooManyRetriesError, TorClientDuplex, tryCreateLoop } from "@hazae41/echalote";
+import { Circuit, createPooledCircuit, createPooledTor, createWebSocketSnowflakeStream, Fallback, TorClientDuplex } from "@hazae41/echalote";
 import { Ed25519 } from "@hazae41/ed25519";
 import { Mutex } from "@hazae41/mutex";
-import { Pool, PoolParams } from "@hazae41/piscine";
+import { Some } from "@hazae41/option";
+import { Cancel, Looped, Pool, PoolParams, Retry, tryLoop } from "@hazae41/piscine";
 import { Ok, Result } from "@hazae41/result";
 import { Sha1 } from "@hazae41/sha1";
 import { X25519 } from "@hazae41/x25519";
-import { Data, Fail, FetcherMore, getSchema, useSchema } from "@hazae41/xswr";
+import { Data, Fail, Fetched, FetcherMore, getSchema, useSchema } from "@hazae41/xswr";
 import { ed25519 as noble_ed25519, x25519 as noble_x25519 } from "@noble/curves/ed25519";
 import { sha1 as noble_sha1 } from "@noble/hashes/sha1";
 import { DependencyList, useCallback, useEffect, useMemo, useState } from "react";
@@ -42,14 +43,14 @@ function useTorPool(params?: PoolParams) {
 
     return new Mutex(new Pool<TorClientDuplex, Error>(async (params) => {
       return await Result.unthrow(async t => {
-        const tor = await tryCreateLoop(async () => {
+        const tor = await tryLoop(async () => {
           const tcp = await createWebSocketSnowflakeStream("wss://snowflake.bamsoftware.com/")
           // const tcp =  await createMeekStream("https://meek.bamsoftware.com/")
           // const tcp =  await createWebSocketStream("ws://localhost:8080")
 
           const tor = new TorClientDuplex(tcp, { fallbacks, ed25519, x25519, sha1 })
 
-          return await tor.tryWait().then(r => r.set(tor))
+          return await tor.tryWait().then(r => r.mapErrSync(Cancel.new).set(tor))
         }, params).then(r => r.throw(t))
 
         return new Ok(createPooledTor(tor, params))
@@ -102,26 +103,16 @@ function useText(url: string) {
 async function tryFetchTorAsText(url: string, circuits: Mutex<Pool<Circuit, Error>>, init: FetcherMore) {
   const { signal } = init
 
-  for (let i = 0; !signal?.aborted && i < 3; i++) {
-    const circuit = await Pool.takeCryptoRandom(circuits).then(r => r.unwrap().result.get())
+  return await tryLoop(async () => {
+    return Result.unthrow<Result<Fetched<string, Error>, Looped<Error>>>(async t => {
+      const circuit = await Pool.takeCryptoRandom(circuits).then(r => r.mapErrSync(Retry.new).throw(t).result.get())
+      const response = await circuit.tryFetch(url, { signal }).then(r => r.mapErrSync(Retry.new).throw(t))
 
-    const subsignal = AbortSignal.timeout(5_000)
-    const response = await circuit.tryFetch(url, { signal: subsignal })
-
-    if (response.isErr()) {
-      console.warn(`Failed ${i + 1} time(s)`, { e: response.get() })
-      await new Promise(ok => setTimeout(ok, 1000 * (2 ** i)))
-      continue
-    }
-
-    if (!response.inner.ok)
-      return new Fail(new Error(await response.get().text()))
-    return new Data(await response.get().text())
-  }
-
-  if (signal?.aborted)
-    return new Fail(new Error(`Aborted`, { cause: signal.reason }))
-  return new Fail(new TooManyRetriesError())
+      if (!response.ok)
+        return new Ok(new Fail(new Error(await response.text())))
+      return new Ok(new Data(await response.text()))
+    })
+  }, { signal }).then(r => Fetched.rewrap(r))
 }
 
 function getTorText(url: string, pool?: Mutex<Pool<Circuit, Error>>) {
@@ -129,7 +120,7 @@ function getTorText(url: string, pool?: Mutex<Pool<Circuit, Error>>) {
 
   return getSchema(`tor:${url}`, async (_, init) => {
     return tryFetchTorAsText(url, pool, init)
-  }, { timeout: 5 * 5_000 })
+  }, { timeout: 5_000 })
 }
 
 function useTorText(url: string, pool?: Mutex<Pool<Circuit, Error>>) {
@@ -145,7 +136,7 @@ function usePoolSizeAndCapacity<T, E>(circuits?: Mutex<Pool<T, E>>) {
     const onCreatedOrDeleted = () => {
       const { size, capacity } = circuits.inner
       setSizeAndCapacity({ size, capacity })
-      return Ok.void()
+      return new Some(undefined)
     }
 
     const offCreated = circuits.inner.events.on("created", onCreatedOrDeleted, { passive: true })
